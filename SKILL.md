@@ -1,290 +1,253 @@
 ---
 name: codex-workflow-astra
-description: Cost-aware software engineering workflow that routes routine implementation to GPT-5.6 Luna and escalates architecture, difficult debugging, high-risk reasoning, and critical review to GPT-6 Astra.
+description: Quality-first software engineering workflow using GPT-5.6 Luna Max as the default engineering worker and GPT-6 Astra for architecture, long-running projects, critical review, and hard diagnosis.
 ---
 
 # Codex Workflow Astra
 
-Use this skill to execute software-engineering tasks with a cost-aware two-model policy.
+## 核心目标
 
-## Priority
+本工作流不追求最低单次 token 消耗，而追求：
 
-The user's explicit instructions take precedence over this skill. Target-repository rules such as `AGENTS.md`, build requirements, safety constraints, and repository-specific policies remain binding. If this skill conflicts with a higher-priority instruction, follow the higher-priority instruction and state the conflict only when it materially changes execution.
+> 在可控成本下，以最低返工率完成高质量工程任务。
 
-Do not stop merely because a routine detail is unspecified. Infer low-risk details from the repository and continue. Ask only when missing information could materially change the result or cause an irreversible/destructive action.
+默认策略已经从「低成本优先」调整为「质量优先」。
 
-## Objective
+## 默认模型策略
 
-Maximize engineering quality per unit of expensive-model usage.
+### Root Agent 默认
 
-Default policy:
+```
+Model: GPT-5.6 Luna
+Reasoning: max fast
+```
 
-- GPT-5.6 Luna is the implementation and throughput model.
-- GPT-6 Astra is the decision, diagnosis, orchestration, and critical-review model.
-- Reasoning effort is selected independently from the model.
-- After Astra resolves the high-value question, return implementation work to Luna immediately.
+适用于大多数真实软件工程任务：
 
-The canonical loop is:
+- C++
+- Qt
+- 多文件修改
+- 重构
+- 调试
+- 架构内实现
 
-`Astra Think → Luna Build → Astra Judge → Luna Finish`
+原因：
 
-Not every task needs every stage. Routine tasks should remain Luna-only.
+对于复杂工程，较高初始推理投入通常可以减少：
 
-## 1. Classify before acting
+- 错误方案
+- 遗漏依赖
+- 重复修改
+- 测试失败后的返工
 
-Classify the next meaningful unit of work into one of these classes.
+## Agent 定位
 
-### L0 — Mechanical
+### Luna Max Engineer
 
-Examples:
+默认工程执行者。
 
-- rename or deterministic text replacement;
-- formatting or comments;
-- repository search and inventory;
-- trivial build-file edits with an exact requested change;
-- obvious include/import fixes.
+负责：
 
-Route: **Luna `none` or `low`**.
+- 分析代码
+- 修改实现
+- 编译测试
+- 调试修复
+- 完成功能
 
-Prefer `low` when code semantics are involved. Use `none` only when the work is genuinely mechanical and the runtime supports it.
+### Luna Medium
 
-### L1 — Routine engineering
+仅用于低风险任务：
 
-Examples:
+- 明确的小修改
+- 简单代码生成
+- 局部调整
+- 机械性实现
 
-- normal feature implementation from clear requirements;
-- CRUD and ordinary data-flow changes;
-- conventional UI work;
-- normal tests;
-- ordinary bug fixes;
-- CMake/package/build configuration;
-- bounded refactoring with clear behavior.
+### Astra Architect
 
-Route: **Luna `medium`**.
+用于：
 
-This is the default route.
+- 架构设计
+- 模块边界
+- API设计
+- 大型迁移方案
 
-### L2 — Complex implementation
+默认：
 
-Examples:
+```
+GPT-6 Astra
+Reasoning: low/medium
+```
 
-- multi-file implementation with nontrivial state flow;
-- moderately difficult debugging;
-- performance-sensitive implementation with measurable criteria;
-- complex parser/serialization logic;
-- implementation requiring careful interaction among several known components.
+Astra输出设计决策后，应返回 Luna 执行。
 
-Route: **Luna `high`**.
+### Astra Diagnostician
 
-Do not escalate merely because the change touches many files. Escalate because the reasoning risk is high, not because the diff is large.
+用于：
 
-### A1 — High-value decision
+- 死锁
+- race condition
+- QObject 生命周期问题
+- UB
+- 崩溃根因分析
+- 高风险系统问题
 
-Examples:
+默认：
 
-- architecture and module boundaries;
-- competing interface designs;
-- significant migration strategy;
-- cross-cutting design with several viable approaches;
-- task decomposition where a wrong plan would create substantial rework;
-- independent review of an important change.
+```
+GPT-6 Astra
+Reasoning: high
+```
 
-Route: **Astra `low`**, increasing to `medium` only when the problem genuinely requires deeper cross-system reasoning.
+## 三种运行模式
 
-### A2 — High-risk / hard diagnosis
+# Mode 1: Standard Engineering
 
-Examples:
+默认模式。
 
-- concurrency, deadlocks, shutdown ordering, races;
-- object lifetime, ownership, use-after-free, undefined behavior;
-- exception boundaries that may terminate a process;
-- authentication, authorization, cryptography, protocol compatibility;
-- schema/data migrations with rollback or integrity risk;
-- difficult root-cause analysis after disciplined Luna attempts fail.
+流程：
 
-Route: **Astra `high`**.
+```
+Luna Max Fast
+    ↓
+实现
+    ↓
+验证
+    ↓
+完成
+```
 
-Use `xhigh` only for unusually difficult system-level reasoning. Do not automatically use `max`.
+适合：
 
-### A3 — Exceptional final judgment
+- Qt UI开发
+- 普通功能
+- 重构
+- Bug修复
 
-Use only when the problem is both exceptionally difficult and consequential, and additional reasoning depth is justified by evidence.
+---
 
-Route: **Astra `max` only by explicit escalation**.
+# Mode 2: Architecture Mode
 
-The workflow must never drift into `max` as a normal fallback.
+当任务存在架构选择时启用。
 
-## 2. Escalation rules
+流程：
 
-Escalate Luna → Astra when at least one of these is true:
+```
+Luna Max
+    ↓
+Astra Architect
+    ↓
+设计决策
+    ↓
+Luna Max实现
+```
 
-1. The task requires a consequential architecture/interface decision with multiple credible alternatives.
-2. The task contains concurrency, lifetime, UB, security, migration, or protocol-integrity risk that exceeds routine implementation.
-3. A root cause remains unclear after **two evidence-based Luna attempts** on the same failure.
-4. The implementation is complete but a critical change warrants independent high-confidence review.
-5. Conflicting constraints require broader reasoning to determine the correct tradeoff.
+不要让Astra承担普通编码工作。
 
-Do not escalate for:
+---
 
-- ordinary compilation errors;
-- mechanical multi-file edits;
-- normal tests;
-- routine documentation;
-- clear implementation work already specified by a plan;
-- large repository size by itself.
+# Mode 3: Long Running Engineering Mode
 
-## 3. Retry budget
+适用于：
 
-For a nontrivial failure, use a hypothesis-driven loop:
+- 多天任务
+- 大型重构
+- 多阶段迁移
+- 需要长期保持设计一致性的项目
 
-1. collect evidence;
-2. state the current hypothesis internally;
-3. make one bounded change;
-4. run the smallest meaningful verification;
-5. update the hypothesis from the result.
+架构：
 
-Do not repeat essentially the same unsuccessful approach more than twice.
+```
+Astra Project Lead
+        |
+        +-- Luna Explorer
+        |
+        +-- Luna Max Implementer
+        |
+        +-- Astra Reviewer
+```
 
-After two failed evidence-based attempts on the same underlying problem:
+Astra负责：
 
-- stop speculative patching;
-- package the evidence;
-- escalate diagnosis to Astra;
-- once Astra identifies the likely root cause and fix strategy, return implementation to Luna.
+- 长期方向
+- 架构一致性
+- 决策记录
 
-## 4. De-escalation rule
+Luna负责：
 
-Astra is not the default implementation worker.
+- 实际工程实现
 
-When Astra has produced a usable:
+## 升级规则
 
-- architecture decision;
-- implementation plan;
-- root-cause diagnosis;
-- review finding;
-- risk assessment;
+升级 Luna 到 Astra：
 
-capture that result in a concise handoff packet and route execution back to Luna unless the remaining work still requires Astra-class reasoning.
+1. 存在重要架构决策；
+2. 涉及并发、生命周期、安全、数据完整性；
+3. Luna Max 已进行两轮证据驱动尝试仍无法解决；
+4. 需要高置信度独立审查。
 
-Never keep Astra active merely because Astra started the task.
+不要因为：
 
-## 5. Review policy
+- 文件多
+- diff大
+- 项目大
 
-Use Astra review only when risk justifies it.
+直接升级 Astra。
 
-### Luna-only review is sufficient for
+## Reasoning 选择
 
-- low-risk local changes;
-- conventional feature implementation;
-- straightforward tests and build changes;
-- mechanical refactors with strong automated verification.
+```
+机械任务              Luna Medium
+普通开发              Luna Max Fast
+复杂实现              Luna Max Fast
+架构决策              Astra Low/Medium
+疑难诊断              Astra High
+极端问题              Astra xHigh/Max
+```
 
-### Astra review is appropriate for
+Max 不作为普通默认升级路径。
 
-- public/core interfaces;
-- concurrency and lifetime behavior;
-- security-sensitive logic;
-- data integrity/migrations;
-- large architecture changes;
-- changes whose failure would be expensive or difficult to detect.
+## Astra使用原则
 
-For Astra review, provide a **Review Packet** rather than asking it to reread the entire repository by default:
+Astra解决高价值问题：
 
-- goal and acceptance criteria;
-- design decisions;
-- changed files or diff;
-- only the relevant interfaces/call chain;
-- validation results;
-- known risks;
-- specific review focus.
+- 架构
+- 判断
+- 根因
+- Review
 
-Expand repository inspection only when the evidence indicates it is necessary.
+完成后：
 
-## 6. Validation policy
+```
+Astra Decision
+        ↓
+Handoff
+        ↓
+Luna Implementation
+```
 
-Validation must be proportional to change risk.
+不要长期让Astra执行普通代码修改。
 
-For each implementation:
-
-1. run targeted tests for changed behavior when available;
-2. run type/lint/static checks relevant to the changed area when useful;
-3. build affected targets/packages;
-4. run a minimal smoke test when it adds meaningful confidence.
-
-Do not automatically run broad, expensive test suites for reversible low-impact changes when targeted verification is sufficient.
-
-Broaden testing when:
-
-- targeted checks fail;
-- the change affects shared/core behavior;
-- the repository requires full validation;
-- the risk profile justifies it.
-
-## 7. Parallel work
-
-Parallelize only genuinely independent workstreams.
-
-Prefer multiple Luna workers for independent implementation tasks. Use Astra to coordinate parallel work only when decomposition, integration, or conflict resolution itself needs higher-level reasoning.
-
-Avoid multiple Astra workers unless independent hard problems truly require them.
-
-When temporary worktrees or branches are created, track ownership and clean them up after successful integration unless the user or repository workflow requires retaining them.
-
-## 8. Runtime model selection
-
-This skill defines routing policy; it must not pretend the runtime switched models when it did not.
-
-If the current environment can choose model and reasoning per subagent/thread:
-
-- delegate using the selected route;
-- pass only the context needed for that task;
-- keep expensive-model context narrow.
-
-If the current environment cannot perform automatic model selection:
-
-- produce a handoff block with the exact target model, reasoning effort, task, evidence, constraints, and success criteria;
-- do not claim that the route has been executed by another model.
-
-Use this format:
+## Handoff格式
 
 ```text
 ROUTE HANDOFF
 Model: GPT-5.6 Luna | GPT-6 Astra
-Reasoning: none | low | medium | high | xhigh | max
-Purpose: <implementation | diagnosis | planning | review>
-Task: <bounded task>
-Context: <minimal sufficient context>
-Constraints: <must preserve>
-Success criteria: <observable completion conditions>
-Evidence: <tests/logs/diff when relevant>
-Return: <what the receiving model must produce>
+Reasoning: medium | high
+Purpose: implementation | planning | diagnosis | review
+Task:
+Context:
+Constraints:
+Success criteria:
+Evidence:
+Return:
 ```
 
-## 9. Completion criteria
+## 完成标准
 
-A task is complete only when:
+任务完成必须满足：
 
-- requested behavior is implemented or the requested analysis is finished;
-- applicable acceptance criteria are satisfied;
-- appropriate validation has been run, or the inability to run it is stated;
-- failed experimental changes are not left behind;
-- temporary artifacts/worktrees/branches created by this workflow are cleaned up unless intentionally retained;
-- the final response states what changed, validation performed, and any remaining material risk.
-
-Do not add speculative improvements outside scope solely because a stronger model is available.
-
-## 10. Default decision table
-
-When uncertain, prefer the cheaper sufficient route:
-
-```text
-Mechanical?                       -> Luna low
-Normal engineering?              -> Luna medium
-Complex but bounded implementation? -> Luna high
-Architecture/critical decision?  -> Astra low/medium
-Hard diagnosis/high-risk logic?  -> Astra high
-Exceptional system problem?      -> Astra xhigh
-Max?                             -> explicit exceptional escalation only
-```
-
-Always return to Luna after the Astra-only reasoning step unless the next step independently qualifies for Astra.
+- 功能或分析目标完成；
+- 编译/测试结果明确；
+- 临时分支、worktree、实验修改已处理；
+- 最终说明修改内容和剩余风险。
